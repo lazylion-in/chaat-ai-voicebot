@@ -189,10 +189,18 @@ def parse_action(llm_text: str):
     clean = llm_text
     if "[ACTION:" in llm_text.upper():
         import re
+        # Find the action
         match = re.search(r'\[ACTION:\s*(.*?)\]', llm_text, re.IGNORECASE)
         if match:
             action = match.group(1).strip().upper()
-            clean = re.sub(r'\[ACTION:.*?\]', '', llm_text, flags=re.IGNORECASE).strip()
+        
+        # Remove ALL action tags and clean up text
+        clean = re.sub(r'\[ACTION:.*?\]', '', llm_text, flags=re.IGNORECASE)
+        # Remove any extra whitespace and fix spacing
+        clean = re.sub(r'\s+', ' ', clean).strip()
+        
+        # Remove any remaining brackets (just in case)
+        clean = re.sub(r'\[.*?\]', '', clean).strip()
     return clean, action
 
 
@@ -388,12 +396,12 @@ async def call_events(request: Request):
         session = ACTIVE_CALLS[call_sid]
         if hasattr(session, 'get') and session.get("final_action"):
             append_csv("call_logs.csv", {
-                "CallSID": call_sid,
-                "Timestamp": datetime.now(timezone.utc).isoformat(),
-                "Transcript": session.get("final_transcript", ""),
-                "BotResponse": session.get("final_bot_response", ""),
-                "Outcome": session["final_action"],
-            }, ["CallSID", "Timestamp", "Transcript", "BotResponse", "Outcome"])
+                "TIME": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                "CALL SID": call_sid,
+                "USER SAID": session.get("final_transcript", ""),
+                "BOT SAID": session.get("final_bot_response", ""),
+                "OUTCOME": session["final_action"],
+            }, ["TIME", "CALL SID", "USER SAID", "BOT SAID", "OUTCOME"])
             print(f"[FINAL] [{call_sid}] Logged outcome: {session['final_action']}")
 
     # Clean up in-memory state if call ended
