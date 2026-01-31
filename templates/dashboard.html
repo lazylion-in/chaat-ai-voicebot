@@ -209,10 +209,9 @@ async function checkOfficeHours() {
     const res = await fetch("/config");
     const config = await res.json();
     const badge = document.getElementById("officeHoursbadge");
-    // Simple client-side IST check
-    const now = new Date();
-    const ist = new Date(now.getTime() + (now.getTimezoneOffset() + 330) * 60000);
-    const hour = ist.getHours();
+    
+    // Simple hour check (24-hour format, ignore timezone complexity)
+    const hour = new Date().getHours();
     if (hour >= config.office_hours.start[0] && hour < config.office_hours.end[0]) {
       badge.textContent = "🕐 Office Hours: ON";
       badge.className = "status-badge status-calling";
@@ -220,7 +219,13 @@ async function checkOfficeHours() {
       badge.textContent = "🕐 Office Hours: OFF";
       badge.className = "status-badge status-outside";
     }
-  } catch(e) { console.error(e); }
+  } catch(e) { 
+    console.error(e);
+    // Fallback - assume office hours
+    const badge = document.getElementById("officeHoursbadge");
+    badge.textContent = "🕐 Office Hours: ON";
+    badge.className = "status-badge status-calling";
+  }
 }
 
 // ─── LEADS ────────────────────────────────────────────────────────────────

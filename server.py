@@ -499,10 +499,8 @@ async def get_next_lead():
 async def trigger_call(request: Request):
     """
     Initiate an outbound call to a lead via Twilio.
-    Office hours are checked here too (belt & suspenders).
+    Note: Office hours removed for dashboard - calls can be triggered anytime.
     """
-    if not is_within_office_hours():
-        return JSONResponse({"status": "error", "message": "Outside office hours (9 AM – 8 PM IST)"}, status_code=403)
 
     body = await request.json()
     phone = body.get("phone", "").strip()
