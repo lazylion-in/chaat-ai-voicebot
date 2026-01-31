@@ -133,11 +133,29 @@ def append_csv(filepath: str, row: dict, fieldnames: list[str]):
 # SECTION 4 — AUTH  (simple user/password from users.csv)
 # ─────────────────────────────────────────────────────────────────────────────
 def authenticate(username: str, password: str):
-    users = read_csv("users.csv")
-    for u in users:
-        if u.get("Username") == username and u.get("Password") == password:
-            return u
-    return None
+    """Authenticate using Supabase users table."""
+    if not supabase:
+        # Fallback to CSV
+        users = read_csv("users.csv")
+        for u in users:
+            if u.get("Username") == username and u.get("Password") == password:
+                return u
+        return None
+    
+    try:
+        # Try Supabase first
+        result = supabase.table("users").select("*").eq("username", username).eq("password", password).execute()
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+        return None
+    except Exception as e:
+        print(f"[AUTH ERROR] {e}")
+        # Fallback to CSV
+        users = read_csv("users.csv")
+        for u in users:
+            if u.get("Username") == username and u.get("Password") == password:
+                return u
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -491,7 +509,10 @@ async def trigger_call(request: Request):
     name  = body.get("name", "Unknown")
     lead_id = body.get("id")  # New: lead ID for Supabase
 
+    print(f"[DEBUG] Trigger call request: {body}")  # Debug line
+    
     if not phone:
+        print(f"[ERROR] No phone number in request: {body}")
         return JSONResponse({"status": "error", "message": "No phone number provided"}, status_code=400)
 
     try:
