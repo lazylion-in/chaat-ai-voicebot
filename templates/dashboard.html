@@ -157,7 +157,7 @@
     </div>
     <div class="table-responsive">
       <table class="table table-dark log-table" id="logsTable">
-        <thead><tr><th>Time</th><th>Call SID</th><th>User Said</th><th>Bot Said</th><th>Outcome</th></tr></thead>
+        <thead><tr><th>Time</th><th>Call SID</th><th>Call Summary</th><th>Outcome</th></tr></thead>
         <tbody id="logsBody">
           <tr><td colspan="5" class="text-muted text-center py-4">No logs yet. Start the dialer!</td></tr>
         </tbody>
@@ -274,7 +274,7 @@ async function triggerNextCall() {
   if (leadIndex >= leads.length) { stopDialer(); document.getElementById("currentLeadLabel").textContent = "All leads called!"; return; }
 
   const lead = leads[leadIndex];
-  document.getElementById("currentLeadLabel").textContent = `Calling: ${lead.Name || "Unknown"} (${lead.Phone})`;
+  document.getElementById("currentLeadLabel").textContent = `Calling: ${lead.name || lead.Name || "Unknown"} (${lead.phone || lead.Phone})`;
   stats.called++;
   updateDialerUI();
 
@@ -282,7 +282,7 @@ async function triggerNextCall() {
     const res = await fetch("/trigger-call", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ phone: lead.Phone, name: lead.Name })
+      body: JSON.stringify({ phone: lead.phone || lead.Phone, name: lead.name || lead.Name, id: lead.id || lead.ID })
     });
     const data = await res.json();
     if (data.status === "ok") {
@@ -326,11 +326,10 @@ async function refreshLogs() {
     const recent = logs.slice(-50).reverse();
     tbody.innerHTML = recent.map(log => `
       <tr>
-        <td>${(log.Timestamp || "—").substring(0,16)}</td>
-        <td style="font-size:0.68rem; color:#666;">${(log.CallSID || "—").substring(0,20)}...</td>
-        <td>${log.Transcript || "—"}</td>
-        <td>${log.BotResponse || "—"}</td>
-        <td><span class="outcome-${log.Outcome || ''}">${log.Outcome || "—"}</span></td>
+        <td>${(log.created_at || log.Timestamp || "—").substring(0,16).replace('T', ' ')}</td>
+        <td style="font-size:0.68rem; color:#666;">${(log.call_sid || log.CallSID || "—").substring(0,20)}...</td>
+        <td>${log.summary || "—"}</td>
+        <td>${(log.final_outcome || log.Outcome || "—"}</span></td>
       </tr>
     `).join("");
   } catch(e) { console.error(e); }
