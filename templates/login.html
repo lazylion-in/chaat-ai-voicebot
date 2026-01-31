@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chaat AI — Login</title>
+<style>
+  :root {
+    --neon-green: #39ff14;
+    --neon-blue:  #00d4ff;
+    --bg-dark:    #0a0a0f;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg-dark);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Segoe UI', sans-serif;
+    color: #e0e0e0;
+  }
+  .login-card {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    backdrop-filter: blur(16px);
+    border-radius: 18px;
+    padding: 44px 36px;
+    width: 100%;
+    max-width: 380px;
+    text-align: center;
+  }
+  .logo { font-size: 2rem; font-weight: 700; margin-bottom: 6px; }
+  .logo .green { color: var(--neon-green); }
+  .subtitle { color: #555; font-size: 0.78rem; margin-bottom: 32px; }
+  label { display: block; text-align: left; font-size: 0.72rem; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; margin-top: 18px; }
+  input {
+    width: 100%;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 11px 14px;
+    color: #ddd;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input:focus { border-color: var(--neon-blue); box-shadow: 0 0 8px rgba(0,212,255,0.2); }
+  .btn-login {
+    width: 100%;
+    margin-top: 28px;
+    padding: 12px;
+    background: linear-gradient(135deg, var(--neon-green), #00cc00);
+    color: #000;
+    font-weight: 700;
+    font-size: 0.9rem;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: box-shadow 0.2s;
+  }
+  .btn-login:hover { box-shadow: 0 0 20px rgba(57,255,20,0.4); }
+  .error-msg { color: #ff4466; font-size: 0.75rem; margin-top: 14px; min-height: 18px; }
+</style>
+</head>
+<body>
+<div class="login-card">
+  <div class="logo"><span class="green">⚡ Chaat AI</span></div>
+  <div class="subtitle">Sales Voice Bot — Control Panel</div>
+
+  <label>Username</label>
+  <input type="text" id="username" placeholder="admin" autocomplete="off">
+
+  <label>Password</label>
+  <input type="password" id="password" placeholder="••••••••" onkeydown="if(event.key==='Enter') login()">
+
+  <button class="btn-login" onclick="login()">Login</button>
+  <div class="error-msg" id="errMsg"></div>
+</div>
+
+<script>
+async function login() {
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value;
+  document.getElementById("errMsg").textContent = "";
+
+  if (!username || !password) { document.getElementById("errMsg").textContent = "Please fill both fields."; return; }
+
+  try {
+    const res = await fetch("/auth", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ username, password })
+    });
+    if (res.ok) {
+      window.location.href = "/dashboard";
+    } else {
+      document.getElementById("errMsg").textContent = "Invalid username or password.";
+    }
+  } catch(e) {
+    document.getElementById("errMsg").textContent = "Connection error. Try again.";
+  }
+}
+</script>
+</body>
+</html>

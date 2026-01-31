@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chaat AI — Power Dialer v2</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+  /* ─── Cyberpunk / Glassmorphism Theme ─── */
+  :root {
+    --neon-green:  #39ff14;
+    --neon-pink:   #ff2d95;
+    --neon-blue:   #00d4ff;
+    --bg-dark:     #0a0a0f;
+    --glass-bg:    rgba(255,255,255,0.04);
+    --glass-border:rgba(255,255,255,0.08);
+  }
+  body {
+    background: var(--bg-dark);
+    color: #e0e0e0;
+    font-family: 'Segoe UI', sans-serif;
+    min-height: 100vh;
+  }
+  .glass-card {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(12px);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 18px;
+  }
+  .card-title { color: var(--neon-blue); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1.5px; }
+  .neon-green { color: var(--neon-green); }
+  .neon-pink  { color: var(--neon-pink); }
+  .neon-blue  { color: var(--neon-blue); }
+
+  /* Buttons */
+  .btn-start {
+    background: linear-gradient(135deg, var(--neon-green), #00cc00);
+    color: #000; font-weight: 700; border: none; border-radius: 8px;
+    padding: 10px 28px; cursor: pointer; transition: box-shadow 0.2s;
+  }
+  .btn-start:hover { box-shadow: 0 0 18px var(--neon-green); }
+  .btn-pause {
+    background: linear-gradient(135deg, #ffaa00, #ff7700);
+    color: #000; font-weight: 700; border: none; border-radius: 8px;
+    padding: 10px 28px; cursor: pointer;
+  }
+  .btn-stop {
+    background: linear-gradient(135deg, var(--neon-pink), #cc0066);
+    color: #fff; font-weight: 700; border: none; border-radius: 8px;
+    padding: 10px 28px; cursor: pointer;
+  }
+
+  /* Status badge */
+  .status-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .status-idle    { background: rgba(255,255,255,0.1); color: #aaa; }
+  .status-calling { background: rgba(57,255,20,0.15);  color: var(--neon-green); box-shadow: 0 0 8px rgba(57,255,20,0.3); }
+  .status-paused  { background: rgba(255,170,0,0.15);  color: #ffaa00; }
+  .status-outside { background: rgba(255,45,149,0.15); color: var(--neon-pink); }
+
+  /* Countdown ring */
+  .countdown-ring { font-size: 2.2rem; font-weight: 700; color: var(--neon-blue); font-variant-numeric: tabular-nums; }
+
+  /* Log table */
+  .log-table { font-size: 0.8rem; }
+  .log-table th { color: var(--neon-blue); font-weight: 500; text-transform: uppercase; letter-spacing: 0.8px; border-bottom-color: var(--glass-border); }
+  .log-table td { border-bottom-color: var(--glass-border); padding: 8px 10px; }
+  .outcome-INTERESTED    { color: var(--neon-green); font-weight: 600; }
+  .outcome-CALLBACK      { color: #ffaa00; font-weight: 600; }
+  .outcome-NOT_INTERESTED { color: var(--neon-pink); font-weight: 600; }
+
+  /* Config editor */
+  .config-textarea {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid var(--glass-border);
+    color: #ccc;
+    border-radius: 8px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.78rem;
+    resize: vertical;
+    min-height: 160px;
+  }
+  .config-textarea:focus { border-color: var(--neon-blue); outline: none; box-shadow: 0 0 8px rgba(0,212,255,0.2); }
+
+  /* Tabs */
+  .nav-tabs .nav-link { color: #888; border: none; background: none; }
+  .nav-tabs .nav-link.active { color: var(--neon-blue); border-bottom: 2px solid var(--neon-blue) !important; background: none; }
+  .nav-tabs .nav-link:hover { color: #fff; }
+</style>
+</head>
+<body>
+
+<!-- ─── HEADER ─── -->
+<nav class="navbar px-4 py-3" style="background: rgba(0,0,0,0.6); border-bottom: 1px solid var(--glass-border);">
+  <span class="fw-bold" style="font-size:1.1rem;"><span class="neon-green">⚡ Chaat AI</span> <span class="text-muted" style="font-size:0.7rem;">v2.0 — Power Dialer</span></span>
+  <div class="d-flex align-items-center gap-3">
+    <span id="officeHoursbadge" class="status-badge status-idle">Checking...</span>
+    <button class="btn btn-sm btn-outline-secondary" onclick="logout()">Logout</button>
+  </div>
+</nav>
+
+<div class="container-fluid px-4 py-3" style="max-width:1200px; margin:0 auto;">
+
+  <!-- ─── ROW 1: DIALER CONTROLS ─── -->
+  <div class="row">
+    <div class="col-md-5">
+      <div class="glass-card">
+        <div class="card-title mb-3">📞 Dialer Control</div>
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+          <button class="btn-start" id="btnStart" onclick="startDialer()">▶ Start</button>
+          <button class="btn-pause" id="btnPause" onclick="pauseDialer()" style="display:none;">⏸ Pause</button>
+          <button class="btn-stop"  id="btnStop"  onclick="stopDialer()"  style="display:none;">⏹ Stop</button>
+          <span id="dialerStatus" class="status-badge status-idle">Idle</span>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="glass-card text-center">
+        <div class="card-title mb-2">⏱️ Next Call In</div>
+        <div class="countdown-ring" id="countdown">—</div>
+        <div class="text-muted" style="font-size:0.72rem;" id="currentLeadLabel">No lead selected</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="glass-card text-center">
+        <div class="card-title mb-2">📊 Session Stats</div>
+        <div class="row text-center">
+          <div class="col-4"><div class="neon-green fw-bold" id="statCalled">0</div><div style="font-size:0.68rem;color:#666;">Called</div></div>
+          <div class="col-4"><div class="neon-green fw-bold" id="statInterested">0</div><div style="font-size:0.68rem;color:#666;">Interested</div></div>
+          <div class="col-4"><div class="neon-pink fw-bold" id="statPending">0</div><div style="font-size:0.68rem;color:#666;">Pending</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── ROW 2: TABS (Logs | Config | Prompt) ─── -->
+  <ul class="nav nav-tabs mb-0 px-2" style="border-bottom-color: var(--glass-border);">
+    <li class="nav-item"><a class="nav-link active" id="tab-logs-btn" onclick="switchTab('logs')">📋 Call Logs</a></li>
+    <li class="nav-item"><a class="nav-link" id="tab-config-btn" onclick="switchTab('config')">⚙️ Bot Config</a></li>
+    <li class="nav-item"><a class="nav-link" id="tab-prompt-btn" onclick="switchTab('prompt')">🧠 AI Prompt</a></li>
+  </ul>
+
+  <!-- LOGS TAB -->
+  <div id="panel-logs" class="glass-card" style="border-top-left-radius:0; border-top-right-radius:0;">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <span class="card-title">Recent Calls</span>
+      <button class="btn btn-sm btn-outline-secondary" onclick="refreshLogs()">↻ Refresh</button>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-dark log-table" id="logsTable">
+        <thead><tr><th>Time</th><th>Call SID</th><th>User Said</th><th>Bot Said</th><th>Outcome</th></tr></thead>
+        <tbody id="logsBody">
+          <tr><td colspan="5" class="text-muted text-center py-4">No logs yet. Start the dialer!</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- CONFIG TAB -->
+  <div id="panel-config" class="glass-card" style="display:none; border-top-left-radius:0; border-top-right-radius:0;">
+    <div class="card-title mb-2">⚙️ bot_config.json</div>
+    <textarea class="form-control config-textarea w-100" id="configEditor" spellcheck="false"></textarea>
+    <div class="mt-2 d-flex gap-2">
+      <button class="btn btn-sm btn-outline-secondary" onclick="saveConfig()">💾 Save Config</button>
+      <span id="configSaveStatus" class="text-muted" style="font-size:0.75rem; align-self:center;"></span>
+    </div>
+  </div>
+
+  <!-- PROMPT TAB -->
+  <div id="panel-prompt" class="glass-card" style="display:none; border-top-left-radius:0; border-top-right-radius:0;">
+    <div class="card-title mb-2">🧠 prompt.txt — The AI Brain</div>
+    <textarea class="form-control config-textarea w-100" id="promptEditor" spellcheck="false" style="min-height:240px;"></textarea>
+    <div class="mt-2 d-flex gap-2">
+      <button class="btn btn-sm btn-outline-secondary" onclick="savePrompt()">💾 Save Prompt</button>
+      <span id="promptSaveStatus" class="text-muted" style="font-size:0.75rem; align-self:center;"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── STATE ────────────────────────────────────────────────────────────────
+let leads = [];
+let leadIndex = 0;
+let dialerState = "idle"; // idle | running | paused
+let countdownTimer = null;
+let stats = { called: 0, interested: 0, pending: 0 };
+
+// ─── INIT ─────────────────────────────────────────────────────────────────
+async function init() {
+  await checkOfficeHours();
+  await fetchLeads();
+  await refreshLogs();
+  loadConfigEditor();
+  loadPromptEditor();
+}
+
+// ─── OFFICE HOURS CHECK ───────────────────────────────────────────────────
+async function checkOfficeHours() {
+  try {
+    const res = await fetch("/config");
+    const config = await res.json();
+    const badge = document.getElementById("officeHoursbadge");
+    // Simple client-side IST check
+    const now = new Date();
+    const ist = new Date(now.getTime() + (now.getTimezoneOffset() + 330) * 60000);
+    const hour = ist.getHours();
+    if (hour >= config.office_hours.start[0] && hour < config.office_hours.end[0]) {
+      badge.textContent = "🕐 Office Hours: ON";
+      badge.className = "status-badge status-calling";
+    } else {
+      badge.textContent = "🕐 Office Hours: OFF";
+      badge.className = "status-badge status-outside";
+    }
+  } catch(e) { console.error(e); }
+}
+
+// ─── LEADS ────────────────────────────────────────────────────────────────
+async function fetchLeads() {
+  const res = await fetch("/leads");
+  leads = await res.json();
+}
+
+// ─── DIALER CONTROL ───────────────────────────────────────────────────────
+function startDialer() {
+  if (leads.length === 0) { alert("No leads loaded! Check leads.csv"); return; }
+  dialerState = "running";
+  updateDialerUI();
+  triggerNextCall();
+}
+
+function pauseDialer() {
+  dialerState = "paused";
+  clearTimeout(countdownTimer);
+  updateDialerUI();
+  document.getElementById("countdown").textContent = "⏸";
+}
+
+function stopDialer() {
+  dialerState = "idle";
+  leadIndex = 0;
+  clearTimeout(countdownTimer);
+  updateDialerUI();
+  document.getElementById("countdown").textContent = "—";
+  document.getElementById("currentLeadLabel").textContent = "Stopped";
+}
+
+function updateDialerUI() {
+  document.getElementById("btnStart").style.display  = dialerState === "idle"    ? "inline-block" : "none";
+  document.getElementById("btnPause").style.display  = dialerState === "running" ? "inline-block" : "none";
+  document.getElementById("btnStop").style.display   = dialerState !== "idle"    ? "inline-block" : "none";
+
+  const badge = document.getElementById("dialerStatus");
+  if (dialerState === "idle")    { badge.textContent = "Idle";    badge.className = "status-badge status-idle"; }
+  if (dialerState === "running") { badge.textContent = "Calling"; badge.className = "status-badge status-calling"; }
+  if (dialerState === "paused")  { badge.textContent = "Paused";  badge.className = "status-badge status-paused"; }
+
+  document.getElementById("statCalled").textContent    = stats.called;
+  document.getElementById("statInterested").textContent = stats.interested;
+  document.getElementById("statPending").textContent    = stats.pending;
+}
+
+// ─── CALL A LEAD ──────────────────────────────────────────────────────────
+async function triggerNextCall() {
+  if (dialerState !== "running") return;
+  if (leadIndex >= leads.length) { stopDialer(); document.getElementById("currentLeadLabel").textContent = "All leads called!"; return; }
+
+  const lead = leads[leadIndex];
+  document.getElementById("currentLeadLabel").textContent = `Calling: ${lead.Name || "Unknown"} (${lead.Phone})`;
+  stats.called++;
+  updateDialerUI();
+
+  try {
+    const res = await fetch("/trigger-call", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ phone: lead.Phone, name: lead.Name })
+    });
+    const data = await res.json();
+    if (data.status === "ok") {
+      console.log("[DIALER] Call triggered:", data.call_sid);
+    } else {
+      console.warn("[DIALER] Error:", data.message);
+    }
+  } catch(e) { console.error("[DIALER]", e); }
+
+  leadIndex++;
+
+  // Wait 60s, then next call (same as v1 Power Dialer)
+  startCountdown(60);
+}
+
+function startCountdown(seconds) {
+  let remaining = seconds;
+  document.getElementById("countdown").textContent = remaining + "s";
+  countdownTimer = setInterval(() => {
+    if (dialerState !== "running") { clearInterval(countdownTimer); return; }
+    remaining--;
+    document.getElementById("countdown").textContent = remaining + "s";
+    if (remaining <= 0) {
+      clearInterval(countdownTimer);
+      triggerNextCall();
+    }
+  }, 1000);
+}
+
+// ─── LOGS ─────────────────────────────────────────────────────────────────
+async function refreshLogs() {
+  try {
+    const res = await fetch("/call-logs");
+    const logs = await res.json();
+    const tbody = document.getElementById("logsBody");
+    if (!logs || logs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-4">No logs yet.</td></tr>';
+      return;
+    }
+    // Show most recent first, limit to 50
+    const recent = logs.slice(-50).reverse();
+    tbody.innerHTML = recent.map(log => `
+      <tr>
+        <td>${(log.Timestamp || "—").substring(0,16)}</td>
+        <td style="font-size:0.68rem; color:#666;">${(log.CallSID || "—").substring(0,20)}...</td>
+        <td>${log.Transcript || "—"}</td>
+        <td>${log.BotResponse || "—"}</td>
+        <td><span class="outcome-${log.Outcome || ''}">${log.Outcome || "—"}</span></td>
+      </tr>
+    `).join("");
+  } catch(e) { console.error(e); }
+}
+
+// ─── CONFIG EDITOR ────────────────────────────────────────────────────────
+async function loadConfigEditor() {
+  const res = await fetch("/config");
+  const config = await res.json();
+  document.getElementById("configEditor").value = JSON.stringify(config, null, 2);
+}
+async function saveConfig() {
+  const raw = document.getElementById("configEditor").value;
+  try {
+    JSON.parse(raw); // Validate JSON
+  } catch(e) { document.getElementById("configSaveStatus").textContent = "❌ Invalid JSON!"; return; }
+
+  const res = await fetch("/update-config", { method:"POST", headers:{"Content-Type":"application/json"}, body: raw });
+  const data = await res.json();
+  document.getElementById("configSaveStatus").textContent = data.status === "ok" ? "✅ Saved!" : "❌ Error";
+  setTimeout(() => { document.getElementById("configSaveStatus").textContent = ""; }, 2000);
+}
+
+// ─── PROMPT EDITOR ────────────────────────────────────────────────────────
+async function loadPromptEditor() {
+  const res = await fetch("/prompt");
+  const data = await res.json();
+  document.getElementById("promptEditor").value = data.prompt || "";
+}
+async function savePrompt() {
+  const prompt = document.getElementById("promptEditor").value;
+  const res = await fetch("/update-prompt", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ prompt }) });
+  const data = await res.json();
+  document.getElementById("promptSaveStatus").textContent = data.status === "ok" ? "✅ Saved!" : "❌ Error";
+  setTimeout(() => { document.getElementById("promptSaveStatus").textContent = ""; }, 2000);
+}
+
+// ─── TABS ─────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  ["logs","config","prompt"].forEach(t => {
+    document.getElementById(`panel-${t}`).style.display = t === name ? "block" : "none";
+    document.getElementById(`tab-${t}-btn`).classList.toggle("active", t === name);
+  });
+  if (name === "logs") refreshLogs();
+}
+
+// ─── AUTH ─────────────────────────────────────────────────────────────────
+function logout() { window.location.href = "/login"; }
+
+// ─── AUTO-REFRESH LOGS every 10s ──────────────────────────────────────────
+setInterval(() => { if (document.getElementById("panel-logs").style.display !== "none") refreshLogs(); }, 10000);
+
+// ─── INIT ─────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>

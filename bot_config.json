@@ -1,0 +1,23 @@
+{
+  "office_hours": {
+    "start": [9, 0],
+    "end": [20, 0],
+    "timezone": "IST"
+  },
+  "ghost_words": [
+    "jhal", "jhall", "zh", "yg", "ok", "you",
+    "thank you", "bye", "amharic", "helpful", "subtitle",
+    "thanks", "hello", "hi", "yes", "no", "um", "uh",
+    "hmm", "okay", "hey"
+  ],
+  "min_input_length": 2,
+  "whisper_context_prompt": "conversation, hindi, english, sales, interested, yes, no, price, meeting, 360 view",
+  "messages": {
+    "greeting": "Namaste! Aapko Chaat AI ki taraf se call aa raha hai. Kya aap thodi der baat kar sakte hain?",
+    "silence_check": "Hello? Kya aap sun pa rahe hain?",
+    "outside_hours": "Maaf kijiye, abhi hum unavailable hain. Subah 9 baje se shaam 8 baje ke beech call karein.",
+    "goodbye": "Bahut shukriya aapka samay dene ke liye. Aage bhi baat karenge. Dhanyavaad!",
+    "rate_limit_exit": "Maaf kijiye, abhi hamari line thodi busy hai. Thodi der mein dobara call karte hain.",
+    "error_fallback": "Maaf kijiye, mujhe samajh nahi aaya. Kya aap dobara bol sakte hain?"
+  }
+}
