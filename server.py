@@ -25,6 +25,7 @@ from twilio.twiml.voice_response import VoiceResponse, Connect
 from twilio.rest import Client
 from dotenv import load_dotenv
 import uvicorn
+from supabase import create_client, Client as SupabaseClient
 
 load_dotenv()
 
@@ -34,6 +35,17 @@ TWILIO_ACCOUNT_SID  = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN   = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_NUMBER       = os.getenv("TWILIO_NUMBER", "+1XXXXXXXXXX")
 PORT                = int(os.getenv("PORT", 8000))  # Render sets PORT automatically
+
+# ─── SUPABASE SETUP ────────────────────────────────────────────────────────────
+SUPABASE_URL        = os.getenv("SUPABASE_URL")
+SUPABASE_KEY        = os.getenv("SUPABASE_KEY")
+supabase = None  # type: SupabaseClient | None
+
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    print("[INIT] Supabase client initialized")
+else:
+    print("[WARNING] Supabase credentials not found - using CSV fallback")
 
 # ─── CONFIG LOADER ───────────────────────────────────────────────────────────
 def load_config() -> dict:
@@ -205,9 +217,90 @@ def parse_action(llm_text: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SECTION 3.5 — SUPABASE LOGGING  (replaces CSV)
+# ─────────────────────────────────────────────────────────────────────────────
+def log_call_to_supabase(call_sid: str, final_action: str, conversation_history: list, start_time: datetime):
+    """Log call to Supabase with summary."""
+    if not supabase:
+        # Fallback to CSV if Supabase not available
+        return log_call_to_csv(call_sid, final_action, conversation_history)
+    
+    try:
+        # Generate call summary
+        summary = generate_call_summary(conversation_history)
+        
+        end_time = datetime.now(timezone.utc)
+        duration = int((end_time - start_time).total_seconds())
+        
+        call_data = {
+            "call_sid": call_sid,
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat(),
+            "duration_seconds": duration,
+            "final_outcome": final_action,
+            "call_summary": summary,
+            "conversation_count": len([h for h in conversation_history if h["role"] == "user"]),
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        result = supabase.table("calls").insert(call_data).execute()
+        print(f"[SUPABASE] Call logged: {call_sid} → {final_action}")
+        return result
+        
+    except Exception as e:
+        print(f"[SUPABASE ERROR] {e}")
+        # Fallback to CSV
+        return log_call_to_csv(call_sid, final_action, conversation_history)
+
+
+def generate_call_summary(conversation_history: list) -> str:
+    """Generate a 2-3 line summary of the call."""
+    if len(conversation_history) < 2:
+        return "Brief call - minimal conversation"
+    
+    # Get key conversation points
+    user_messages = [h["content"] for h in conversation_history if h["role"] == "user"]
+    bot_messages = [h["content"] for h in conversation_history if h["role"] == "assistant"]
+    
+    # Simple summary logic
+    if len(user_messages) == 1:
+        summary = f"Customer said: '{user_messages[0][:50]}...'. "
+    else:
+        summary = f"Customer had {len(user_messages)} exchanges. "
+    
+    summary += f"Bot provided information about Google Maps services."
+    
+    return summary[:200]  # Limit to 200 characters
+
+
+def log_call_to_csv(call_sid: str, final_action: str, conversation_history: list):
+    """Fallback CSV logging."""
+    summary = generate_call_summary(conversation_history)
+    
+    # Get last user/bot messages for compatibility
+    last_user = ""
+    last_bot = ""
+    for msg in reversed(conversation_history):
+        if msg["role"] == "user" and not last_user:
+            last_user = msg["content"]
+        elif msg["role"] == "assistant" and not last_bot:
+            last_bot = msg["content"]
+    
+    append_csv("call_logs.csv", {
+        "TIME": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "CALL SID": call_sid,
+        "USER SAID": last_user,
+        "BOT SAID": last_bot,
+        "OUTCOME": final_action,
+        "CALL SUMMARY": summary,
+    }, ["TIME", "CALL SID", "USER SAID", "BOT SAID", "OUTCOME", "CALL SUMMARY"])
+    print(f"[CSV Fallback] Call logged: {call_sid} → {final_action}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SECTION 6 — IN-MEMORY CALL STATE  (replaces v1 race-condition guard)
 # ─────────────────────────────────────────────────────────────────────────────
-# Stores active call sessions: { call_sid: { "history": [...], "silence_count": int, "active": bool } }
+# Stores active call sessions: { call_sid: { "history": [...], "silence_count": int, "active": bool, "start_time": datetime } }
 ACTIVE_CALLS = {}
 
 
@@ -255,7 +348,12 @@ async def voice_input(request: Request):
     
     # Initialize session if new
     if call_sid not in ACTIVE_CALLS:
-        ACTIVE_CALLS[call_sid] = {"history": [], "silence_count": 0, "active": True}
+        ACTIVE_CALLS[call_sid] = {
+            "history": [], 
+            "silence_count": 0, 
+            "active": True,
+            "start_time": datetime.now(timezone.utc)
+        }
     
     session = ACTIVE_CALLS[call_sid]
     
@@ -387,22 +485,22 @@ async def trigger_call(request: Request):
 async def call_events(request: Request):
     """Twilio status callback. Logs call completion events."""
     form = await request.form()
-    call_sid = form.get("CallSid", "")
+    call_sid = str(form.get("CallSid", ""))
     status   = form.get("CallStatus", "")
     print(f"[EVENTS] {call_sid} → {status}")
 
     # Log final outcome when call completes
     if status in ("completed", "failed", "no-answer", "canceled") and call_sid in ACTIVE_CALLS:
         session = ACTIVE_CALLS[call_sid]
-        if hasattr(session, 'get') and session.get("final_action"):
-            append_csv("call_logs.csv", {
-                "TIME": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                "CALL SID": call_sid,
-                "USER SAID": session.get("final_transcript", ""),
-                "BOT SAID": session.get("final_bot_response", ""),
-                "OUTCOME": session["final_action"],
-            }, ["TIME", "CALL SID", "USER SAID", "BOT SAID", "OUTCOME"])
-            print(f"[FINAL] [{call_sid}] Logged outcome: {session['final_action']}")
+        
+        # Get final outcome
+        final_action = session.get("final_action", "UNKNOWN")
+        conversation_history = session.get("history", [])
+        start_time = session.get("start_time", datetime.now(timezone.utc))
+        
+        # Log to Supabase (or CSV fallback)
+        log_call_to_supabase(call_sid, final_action, conversation_history, start_time)
+        print(f"[FINAL] [{call_sid}] Logged outcome: {final_action}")
 
     # Clean up in-memory state if call ended
     if call_sid in ACTIVE_CALLS:
