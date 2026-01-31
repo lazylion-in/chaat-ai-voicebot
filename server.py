@@ -220,7 +220,7 @@ def parse_action(llm_text: str):
 # SECTION 3.5 — SUPABASE LOGGING  (replaces CSV)
 # ─────────────────────────────────────────────────────────────────────────────
 def log_call_to_supabase(call_sid: str, final_action: str, conversation_history: list, start_time: datetime):
-    """Log call to Supabase with summary."""
+    """Log call to Supabase with summary - using existing call_logs table."""
     if not supabase:
         # Fallback to CSV if Supabase not available
         return log_call_to_csv(call_sid, final_action, conversation_history)
@@ -232,18 +232,20 @@ def log_call_to_supabase(call_sid: str, final_action: str, conversation_history:
         end_time = datetime.now(timezone.utc)
         duration = int((end_time - start_time).total_seconds())
         
+        # Get lead phone from session (if available)
+        lead_phone = get_lead_phone_from_call_sid(call_sid)
+        
         call_data = {
             "call_sid": call_sid,
-            "start_time": start_time.isoformat(),
-            "end_time": end_time.isoformat(),
-            "duration_seconds": duration,
-            "final_outcome": final_action,
-            "call_summary": summary,
-            "conversation_count": len([h for h in conversation_history if h["role"] == "user"]),
+            "duration": duration,
+            "outcome": final_action,
+            "summary": summary,
+            "lead_phone": lead_phone,
+            "recording_url": None,  # Can be added later if needed
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         
-        result = supabase.table("calls").insert(call_data).execute()
+        result = supabase.table("call_logs").insert(call_data).execute()
         print(f"[SUPABASE] Call logged: {call_sid} → {final_action}")
         return result
         
@@ -271,6 +273,23 @@ def generate_call_summary(conversation_history: list) -> str:
     summary += f"Bot provided information about Google Maps services."
     
     return summary[:200]  # Limit to 200 characters
+
+
+def get_lead_phone_from_call_sid(call_sid: str) -> str:
+    """Get lead phone number associated with a call SID."""
+    try:
+        if not supabase:
+            return ""
+        
+        # Query call_logs to find the most recent call with this SID
+        result = supabase.table("call_logs").select("lead_phone").eq("call_sid", call_sid).execute()
+        
+        if result.data and len(result.data) > 0:
+            return result.data[0].get("lead_phone", "")
+        return ""
+    except Exception as e:
+        print(f"[ERROR] Getting lead phone: {e}")
+        return ""
 
 
 def log_call_to_csv(call_sid: str, final_action: str, conversation_history: list):
@@ -430,15 +449,32 @@ async def voice_input(request: Request):
 
 @app.get("/get-next-lead")
 async def get_next_lead():
-    """Fetch the next un-called lead from leads.csv."""
-    leads = read_csv("leads.csv")
-    logs  = read_csv("call_logs.csv")
-    called_sids = {log.get("CallSID") for log in logs}  # Not perfect, but simple
-
-    # For simplicity: return leads in order. The dashboard tracks index client-side.
-    if not leads:
-        return JSONResponse({"status": "no_leads", "lead": None})
-    return JSONResponse({"status": "ok", "leads": leads})
+    """Fetch the next un-called lead from Supabase leads table."""
+    if not supabase:
+        # Fallback to CSV
+        leads = read_csv("leads.csv")
+        logs  = read_csv("call_logs.csv")
+        called_sids = {log.get("CallSID") for log in logs}
+        if not leads:
+            return JSONResponse({"status": "no_leads", "lead": None})
+        return JSONResponse({"status": "ok", "leads": leads})
+    
+    try:
+        # Get leads with NEW status
+        result = supabase.table("leads").select("*").eq("status", "NEW").execute()
+        leads = result.data if result.data else []
+        
+        if not leads:
+            return JSONResponse({"status": "no_leads", "lead": None})
+        return JSONResponse({"status": "ok", "leads": leads})
+        
+    except Exception as e:
+        print(f"[ERROR] Getting leads: {e}")
+        # Fallback to CSV
+        leads = read_csv("leads.csv")
+        if not leads:
+            return JSONResponse({"status": "no_leads", "lead": None})
+        return JSONResponse({"status": "ok", "leads": leads})
 
 
 @app.post("/trigger-call")
@@ -453,6 +489,7 @@ async def trigger_call(request: Request):
     body = await request.json()
     phone = body.get("phone", "").strip()
     name  = body.get("name", "Unknown")
+    lead_id = body.get("id")  # New: lead ID for Supabase
 
     if not phone:
         return JSONResponse({"status": "error", "message": "No phone number provided"}, status_code=400)
@@ -472,6 +509,10 @@ async def trigger_call(request: Request):
             status_callback_event=["completed", "failed", "no-answer", "canceled"],
             timeout=30,
         )
+
+        # Update lead status to CALLED in Supabase
+        if supabase and lead_id:
+            supabase.table("leads").update({"status": "CALLED"}).eq("id", lead_id).execute()
 
         print(f"[DIALER] Call initiated: {call.sid} → {name} ({phone})")
         return JSONResponse({"status": "ok", "call_sid": call.sid, "name": name})
@@ -536,11 +577,29 @@ async def dashboard():
 
 @app.get("/call-logs")
 async def get_call_logs():
-    return JSONResponse(read_csv("call_logs.csv"))
+    """Get call logs from Supabase."""
+    if not supabase:
+        return JSONResponse(read_csv("call_logs.csv"))
+    
+    try:
+        result = supabase.table("call_logs").select("*").order("created_at", desc=True).execute()
+        return JSONResponse(result.data if result.data else [])
+    except Exception as e:
+        print(f"[ERROR] Getting call logs: {e}")
+        return JSONResponse(read_csv("call_logs.csv"))
 
 @app.get("/leads")
 async def get_leads():
-    return JSONResponse(read_csv("leads.csv"))
+    """Get leads from Supabase."""
+    if not supabase:
+        return JSONResponse(read_csv("leads.csv"))
+    
+    try:
+        result = supabase.table("leads").select("*").order("created_at", desc=True).execute()
+        return JSONResponse(result.data if result.data else [])
+    except Exception as e:
+        print(f"[ERROR] Getting leads: {e}")
+        return JSONResponse(read_csv("leads.csv"))
 
 @app.get("/config")
 async def get_config():
