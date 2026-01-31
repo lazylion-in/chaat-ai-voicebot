@@ -25,7 +25,7 @@ from twilio.twiml.voice_response import VoiceResponse, Connect
 from twilio.rest import Client
 from dotenv import load_dotenv
 import uvicorn
-from supabase import create_client, Client as SupabaseClient
+
 
 load_dotenv()
 
@@ -36,16 +36,7 @@ TWILIO_AUTH_TOKEN   = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_NUMBER       = os.getenv("TWILIO_NUMBER", "+1XXXXXXXXXX")
 PORT                = int(os.getenv("PORT", 8000))  # Render sets PORT automatically
 
-# ─── SUPABASE SETUP ────────────────────────────────────────────────────────────
-SUPABASE_URL        = os.getenv("SUPABASE_URL")
-SUPABASE_KEY        = os.getenv("SUPABASE_KEY")
-supabase = None  # type: SupabaseClient | None
 
-if SUPABASE_URL and SUPABASE_KEY:
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print("[INIT] Supabase client initialized")
-else:
-    print("[WARNING] Supabase credentials not found - using CSV fallback")
 
 # ─── CONFIG LOADER ───────────────────────────────────────────────────────────
 def load_config() -> dict:
@@ -133,29 +124,11 @@ def append_csv(filepath: str, row: dict, fieldnames: list[str]):
 # SECTION 4 — AUTH  (simple user/password from users.csv)
 # ─────────────────────────────────────────────────────────────────────────────
 def authenticate(username: str, password: str):
-    """Authenticate using Supabase users table."""
-    if not supabase:
-        # Fallback to CSV
-        users = read_csv("users.csv")
-        for u in users:
-            if u.get("Username") == username and u.get("Password") == password:
-                return u
-        return None
-    
-    try:
-        # Try Supabase first
-        result = supabase.table("users").select("*").eq("username", username).eq("password", password).execute()
-        if result.data and len(result.data) > 0:
-            return result.data[0]
-        return None
-    except Exception as e:
-        print(f"[AUTH ERROR] {e}")
-        # Fallback to CSV
-        users = read_csv("users.csv")
-        for u in users:
-            if u.get("Username") == username and u.get("Password") == password:
-                return u
-        return None
+    users = read_csv("users.csv")
+    for u in users:
+        if u.get("Username") == username and u.get("Password") == password:
+            return u
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -237,40 +210,30 @@ def parse_action(llm_text: str):
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 3.5 — SUPABASE LOGGING  (replaces CSV)
 # ─────────────────────────────────────────────────────────────────────────────
-def log_call_to_supabase(call_sid: str, final_action: str, conversation_history: list, start_time: datetime):
-    """Log call to Supabase with summary - using existing call_logs table."""
-    if not supabase:
-        # Fallback to CSV if Supabase not available
-        return log_call_to_csv(call_sid, final_action, conversation_history)
+def log_call_to_csv_new(call_sid: str, final_action: str, conversation_history: list):
+    """Log call to CSV with summary."""
+    summary = generate_call_summary(conversation_history)
     
-    try:
-        # Generate call summary
-        summary = generate_call_summary(conversation_history)
-        
-        end_time = datetime.now(timezone.utc)
-        duration = int((end_time - start_time).total_seconds())
-        
-        # Get lead phone from session (if available)
-        lead_phone = get_lead_phone_from_call_sid(call_sid)
-        
-        call_data = {
-            "call_sid": call_sid,
-            "duration": duration,
-            "outcome": final_action,
-            "summary": summary,
-            "lead_phone": lead_phone,
-            "recording_url": None,  # Can be added later if needed
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        
-        result = supabase.table("call_logs").insert(call_data).execute()
-        print(f"[SUPABASE] Call logged: {call_sid} → {final_action}")
-        return result
-        
-    except Exception as e:
-        print(f"[SUPABASE ERROR] {e}")
-        # Fallback to CSV
-        return log_call_to_csv(call_sid, final_action, conversation_history)
+    # Get last user/bot messages for compatibility
+    last_user = ""
+    last_bot = ""
+    for msg in reversed(conversation_history):
+        if msg["role"] == "user" and not last_user:
+            last_user = msg["content"]
+        elif msg["role"] == "assistant" and not last_bot:
+            last_bot = msg["content"]
+    
+    append_csv("call_logs.csv", {
+        "TIME": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "CALL SID": call_sid,
+        "USER SAID": last_user,
+        "BOT SAID": last_bot,
+        "OUTCOME": final_action,
+        "CALL SUMMARY": summary,
+    }, ["TIME", "CALL SID", "USER SAID", "BOT SAID", "OUTCOME", "CALL SUMMARY"])
+    print(f"[CSV] Call logged: {call_sid} → {final_action}")
+    
+
 
 
 def generate_call_summary(conversation_history: list) -> str:
@@ -293,45 +256,10 @@ def generate_call_summary(conversation_history: list) -> str:
     return summary[:200]  # Limit to 200 characters
 
 
-def get_lead_phone_from_call_sid(call_sid: str) -> str:
-    """Get lead phone number associated with a call SID."""
-    try:
-        if not supabase:
-            return ""
-        
-        # Query call_logs to find the most recent call with this SID
-        result = supabase.table("call_logs").select("lead_phone").eq("call_sid", call_sid).execute()
-        
-        if result.data and len(result.data) > 0:
-            return result.data[0].get("lead_phone", "")
-        return ""
-    except Exception as e:
-        print(f"[ERROR] Getting lead phone: {e}")
-        return ""
 
 
-def log_call_to_csv(call_sid: str, final_action: str, conversation_history: list):
-    """Fallback CSV logging."""
-    summary = generate_call_summary(conversation_history)
-    
-    # Get last user/bot messages for compatibility
-    last_user = ""
-    last_bot = ""
-    for msg in reversed(conversation_history):
-        if msg["role"] == "user" and not last_user:
-            last_user = msg["content"]
-        elif msg["role"] == "assistant" and not last_bot:
-            last_bot = msg["content"]
-    
-    append_csv("call_logs.csv", {
-        "TIME": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-        "CALL SID": call_sid,
-        "USER SAID": last_user,
-        "BOT SAID": last_bot,
-        "OUTCOME": final_action,
-        "CALL SUMMARY": summary,
-    }, ["TIME", "CALL SID", "USER SAID", "BOT SAID", "OUTCOME", "CALL SUMMARY"])
-    print(f"[CSV Fallback] Call logged: {call_sid} → {final_action}")
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -467,28 +395,18 @@ async def voice_input(request: Request):
 
 @app.get("/get-next-lead")
 async def get_next_lead():
-    """Fetch the next un-called lead from Supabase leads table."""
-    if not supabase:
-        # Fallback to CSV
-        leads = read_csv("leads.csv")
-        logs  = read_csv("call_logs.csv")
-        called_sids = {log.get("CallSID") for log in logs}
-        if not leads:
-            return JSONResponse({"status": "no_leads", "lead": None})
-        return JSONResponse({"status": "ok", "leads": leads})
+    """Fetch the next un-called lead from leads.csv."""
+    leads = read_csv("leads.csv")
+    logs  = read_csv("call_logs.csv")
+    called_sids = {log.get("CallSID") for log in logs}  # Not perfect, but simple
+
+    # For simplicity: return leads in order. The dashboard tracks index client-side.
+    if not leads:
+        return JSONResponse({"status": "no_leads", "lead": None})
+    return JSONResponse({"status": "ok", "leads": leads})
     
     try:
-        # Get leads with NEW status
-        result = supabase.table("leads").select("*").eq("status", "NEW").execute()
-        leads = result.data if result.data else []
-        
-        if not leads:
-            return JSONResponse({"status": "no_leads", "lead": None})
-        return JSONResponse({"status": "ok", "leads": leads})
-        
-    except Exception as e:
-        print(f"[ERROR] Getting leads: {e}")
-        # Fallback to CSV
+        # Get leads from CSV for now
         leads = read_csv("leads.csv")
         if not leads:
             return JSONResponse({"status": "no_leads", "lead": None})
@@ -529,10 +447,9 @@ async def trigger_call(request: Request):
             timeout=30,
         )
 
-        # Update lead status to CALLED in Supabase
-        if supabase and lead_id:
-            supabase.table("leads").update({"status": "CALLED"}).eq("id", lead_id).execute()
-
+        # TODO: Update lead status when we have database
+    # For now, just log the call
+        
         print(f"[DIALER] Call initiated: {call.sid} → {name} ({phone})")
         return JSONResponse({"status": "ok", "call_sid": call.sid, "name": name})
 
@@ -558,9 +475,9 @@ async def call_events(request: Request):
         conversation_history = session.get("history", [])
         start_time = session.get("start_time", datetime.now(timezone.utc))
         
-        # Log to Supabase (or CSV fallback)
-        log_call_to_supabase(call_sid, final_action, conversation_history, start_time)
-        print(f"[FINAL] [{call_sid}] Logged outcome: {final_action}")
+    # Log to CSV
+    log_call_to_csv_new(call_sid, final_action, conversation_history)
+    print(f"[FINAL] [{call_sid}] Logged outcome: {final_action}")
 
     # Clean up in-memory state if call ended
     if call_sid in ACTIVE_CALLS:
@@ -596,29 +513,13 @@ async def dashboard():
 
 @app.get("/call-logs")
 async def get_call_logs():
-    """Get call logs from Supabase."""
-    if not supabase:
-        return JSONResponse(read_csv("call_logs.csv"))
-    
-    try:
-        result = supabase.table("call_logs").select("*").order("created_at", desc=True).execute()
-        return JSONResponse(result.data if result.data else [])
-    except Exception as e:
-        print(f"[ERROR] Getting call logs: {e}")
-        return JSONResponse(read_csv("call_logs.csv"))
+    """Get call logs from CSV."""
+    return JSONResponse(read_csv("call_logs.csv"))
 
 @app.get("/leads")
 async def get_leads():
-    """Get leads from Supabase."""
-    if not supabase:
-        return JSONResponse(read_csv("leads.csv"))
-    
-    try:
-        result = supabase.table("leads").select("*").order("created_at", desc=True).execute()
-        return JSONResponse(result.data if result.data else [])
-    except Exception as e:
-        print(f"[ERROR] Getting leads: {e}")
-        return JSONResponse(read_csv("leads.csv"))
+    """Get leads from CSV."""
+    return JSONResponse(read_csv("leads.csv"))
 
 @app.get("/config")
 async def get_config():

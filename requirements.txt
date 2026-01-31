@@ -4,4 +4,5 @@ groq>=0.4.0
 twilio>=8.0.0
 python-dotenv>=1.0.0
 python-multipart>=0.0.6
-supabase>=2.10.0
+supabase==2.3.0
+websockets>=11.0.3
